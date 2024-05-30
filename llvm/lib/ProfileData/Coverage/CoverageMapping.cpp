@@ -1441,6 +1441,86 @@ CoverageMapping::getInstantiationGroups(StringRef Filename) const {
   return Result;
 }
 
+static std::vector<CountedRegion> mergeRegions(std::vector<CountedRegion> input) {
+  llvm::sort(input, [](const CountedRegion &LHS, const CountedRegion &RHS) {
+    if (LHS.startLoc() != RHS.startLoc())
+      return LHS.startLoc() < RHS.startLoc();
+    
+    return LHS.endLoc() < RHS.endLoc();
+  });
+
+  CounterExpressionBuilder Builder{};
+  std::vector<CountedRegion> result;
+  for (auto it = input.begin(); it != input.end();) {
+    CountedRegion region = *it++;
+    while (it != input.end() && it->startLoc() == region.startLoc() && it->endLoc() == region.endLoc()) {
+      region.ExecutionCount += it->ExecutionCount;
+      region.FalseExecutionCount += it->FalseExecutionCount;
+      // TODO: MCDC?
+      ++it;
+    }
+
+    result.push_back(std::move(region));
+  }
+  return result;
+}
+
+void llvm::coverage::CoverageMapping::combineInstantiations() {
+  // Group all the functions with the same file and start line
+  std::map<std::pair<std::string, unsigned>, std::vector<const FunctionRecord *>>
+      functionGroups;
+  for (const auto &function : Functions) {
+    auto file_id = findMainViewFileID(function);
+    if (!file_id) {
+      continue;
+    }
+    const auto& filename = function.Filenames[*file_id];
+    unsigned startLine = function.CountedRegions[0].LineStart;
+    functionGroups[{filename, startLine}].push_back(&function);
+  }
+
+  FilenameHash2RecordIndices.clear();
+
+  std::vector<FunctionRecord> newFunctions{};
+  for (const auto &group : functionGroups) {
+
+    FunctionRecord newFunction = *group.second[0];
+    for (size_t i = 1; i < group.second.size(); i++) {
+      const auto &function = *group.second[i];
+      newFunction.CountedRegions.insert(newFunction.CountedRegions.end(),
+                                        function.CountedRegions.begin(),
+                                        function.CountedRegions.end());
+      newFunction.CountedBranchRegions.insert(
+          newFunction.CountedBranchRegions.end(),
+          function.CountedBranchRegions.begin(),
+          function.CountedBranchRegions.end());
+      newFunction.MCDCRecords.insert(newFunction.MCDCRecords.end(),
+                                     function.MCDCRecords.begin(),
+                                     function.MCDCRecords.end());
+      newFunction.ExecutionCount += function.ExecutionCount;
+    }
+
+    newFunction.CountedRegions = mergeRegions(newFunction.CountedRegions);
+    newFunction.CountedBranchRegions = mergeRegions(newFunction.CountedBranchRegions);
+    
+    // TODO: MCDC?
+
+    unsigned RecordIndex = newFunctions.size();
+    for (StringRef Filename : newFunction.Filenames) {
+      auto &RecordIndices = FilenameHash2RecordIndices[hash_value(Filename)];
+      // Note that there may be duplicates in the filename set for a function
+      // record, because of e.g. macro expansions in the function in which both
+      // the macro and the function are defined in the same file.
+      if (RecordIndices.empty() || RecordIndices.back() != RecordIndex)
+        RecordIndices.push_back(RecordIndex);
+    }
+
+    newFunctions.push_back(std::move(newFunction));
+  }
+
+  Functions = newFunctions;
+}
+
 CoverageData
 CoverageMapping::getCoverageForFunction(const FunctionRecord &Function) const {
   auto MainFileID = findMainViewFileID(Function);

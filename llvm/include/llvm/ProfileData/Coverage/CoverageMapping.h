@@ -705,7 +705,9 @@ struct FunctionRecord {
   FunctionRecord(StringRef Name, ArrayRef<StringRef> Filenames)
       : Name(Name), Filenames(Filenames.begin(), Filenames.end()) {}
 
+  FunctionRecord(const FunctionRecord&FR) = default;
   FunctionRecord(FunctionRecord &&FR) = default;
+  FunctionRecord &operator=(const FunctionRecord &) = default;
   FunctionRecord &operator=(FunctionRecord &&) = default;
 
   void pushMCDCRecord(MCDCRecord &&Record) {
@@ -1024,6 +1026,8 @@ public:
   /// the file in which the definition for the common function begins.
   std::vector<InstantiationGroup>
   getInstantiationGroups(StringRef Filename) const;
+
+  void combineInstantiations();
 };
 
 /// Coverage statistics for a single line.

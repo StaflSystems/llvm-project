@@ -1118,6 +1118,7 @@ int CodeCoverageTool::doShow(int argc, const char **argv,
   ViewOpts.ShowOutputDirectory = ShowOutputDirectory;
   ViewOpts.TabSize = TabSize;
   ViewOpts.ProjectTitle = ProjectTitle;
+  ViewOpts.CombineInstantiations = true; // TODO: parse this from CLI args
 
   if (ViewOpts.hasOutputDirectory()) {
     if (auto E = sys::fs::create_directories(ViewOpts.ShowOutputDirectory)) {
@@ -1140,8 +1141,13 @@ int CodeCoverageTool::doShow(int argc, const char **argv,
                                 : "Created: " + ModifiedTimeStr;
 
   auto Coverage = load();
+
   if (!Coverage)
     return 1;
+
+  if (ViewOpts.CombineInstantiations) {
+    Coverage->combineInstantiations();
+  }
 
   auto Printer = CoveragePrinter::create(ViewOpts);
 
